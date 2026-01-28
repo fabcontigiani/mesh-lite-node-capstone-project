@@ -18,8 +18,34 @@
 #include "freertos/task.h"
 #include "freertos/timers.h"
 #include "esp_mesh_lite.h"
+#include "cJSON.h"
 
 static const char *TAG = "root_node";
+
+// Handler para mensajes JSON recibidos desde leaf
+static cJSON* root_mesh_msg_handler(cJSON *payload, uint32_t seq)
+{
+    cJSON *size_item = cJSON_GetObjectItem(payload, "photo_size");
+    cJSON *event_item = cJSON_GetObjectItem(payload, "motion_event");
+    
+    if (size_item && cJSON_IsNumber(size_item)) {
+        int photo_size = size_item->valueint;
+        int motion_event = (event_item && cJSON_IsNumber(event_item)) ? event_item->valueint : -1;
+        
+        ESP_LOGI(TAG, "========================================");
+        ESP_LOGI(TAG, "  PHOTO INFO RECEIVED FROM LEAF");
+        ESP_LOGI(TAG, "  Photo size: %d bytes", photo_size);
+        if (motion_event >= 0) {
+            ESP_LOGI(TAG, "  Motion event #: %d", motion_event);
+        }
+        ESP_LOGI(TAG, "========================================");
+    } else {
+        char *s = cJSON_PrintUnformatted(payload);
+        ESP_LOGW(TAG, "Received unknown payload from leaf: %s", s ? s : "<null>");
+        if (s) free(s);
+    }
+    return NULL; /* No response */
+}
 
 static bool s_initialized = false;
 static TimerHandle_t s_status_timer = NULL;
@@ -39,6 +65,14 @@ esp_err_t root_node_init(void)
     ESP_LOGI(TAG, "==============================");
     ESP_LOGI(TAG, "This node will NEVER enter deep sleep");
     ESP_LOGI(TAG, "It maintains the mesh network 24/7");
+
+    // Registrar handler de recepción de mensajes
+    /* Registrar actions JSON para mensajes entrantes (tipo "photo_info" desde leaf) */
+    static const esp_mesh_lite_msg_action_t root_actions[] = {
+        {"photo_info", NULL, root_mesh_msg_handler},  // Tipo de mensaje enviado por leaf
+        {NULL, NULL, NULL}  // Terminador obligatorio
+    };
+    esp_mesh_lite_msg_action_list_register(root_actions);
 
     /*
      * Configure SoftAP inactive time to 60 seconds.

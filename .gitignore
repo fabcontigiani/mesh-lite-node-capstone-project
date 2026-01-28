@@ -4,6 +4,7 @@ managed_components/
 
 # IDE
 .vscode/
+.cache/
 *.code-workspace
 
 # Configuración local
