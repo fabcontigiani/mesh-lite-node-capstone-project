@@ -32,15 +32,20 @@ La principal ventaja sobre ESP-MESH tradicional es que **cada nodo puede acceder
 ```
 trapcam_mesh/
 ├── main/                      # Aplicación principal modularizada
-│   ├── main.c                 # Punto de entrada, selecciona modo root/leaf
-│   ├── Kconfig.projbuild      # Opciones de configuración del proyecto
+│   ├── main.c                 # Punto de entrada, selecciona modo root/relay/leaf
+│   ├── Kconfig.projbuild      # Opciones de configuración (choice MESH_NODE_ROLE)
 │   ├── CMakeLists.txt         # Configuración de build con ULP
 │   ├── root_node/             # Módulo para nodo raíz
 │   │   ├── root_node.c        # Lógica del nodo root (siempre activo)
 │   │   └── root_node.h        # Interfaz pública del módulo root
+│   ├── relay_node/            # Módulo para nodo relay
+│   │   ├── relay_node.c       # Lógica del nodo relay (light sleep + camera)
+│   │   └── relay_node.h       # Interfaz pública del módulo relay
 │   ├── leaf_node/             # Módulo para nodos hoja
 │   │   ├── leaf_node.c        # Lógica del nodo leaf (deep sleep)
 │   │   ├── leaf_node.h        # Interfaz pública del módulo leaf
+│   │   ├── camera_driver.c    # Driver para cámara ESP32-CAM (compartido)
+│   │   ├── camera_driver.h    # Interfaz del módulo de cámara
 │   │   ├── ulp_pir.c          # Interfaz C para el programa ULP
 │   │   └── ulp_pir.h          # Declaraciones del módulo ULP PIR
 │   └── ulp/                   # Programas del coprocesador ULP
@@ -59,7 +64,7 @@ trapcam_mesh/
 
 ### 1. **main/** - Aplicación Principal (Modularizada)
 
-El código está organizado en módulos separados para **nodo root** y **nodo leaf**, permitiendo comportamientos diferenciados según el rol en la red mesh.
+El código está organizado en módulos separados para **nodo root**, **nodo relay** y **nodo leaf**, permitiendo comportamientos diferenciados según el rol en la red mesh.
 
 #### **1.1 main.c - Punto de Entrada**
 
@@ -75,23 +80,23 @@ El código está organizado en módulos separados para **nodo root** y **nodo le
 
 2. **Configuración Mesh según rol:**
    ```c
-   #if CONFIG_MESH_ROOT
-       // Nivel 1 exclusivo - solo este puede ser root
-       esp_mesh_lite_set_allowed_level(1);
-   #else
-       // Prohibir nivel 1 - nunca será root
-       esp_mesh_lite_set_disallowed_level(1);
+   #if defined(CONFIG_MESH_ROOT)
+       esp_mesh_lite_set_allowed_level(1);  // Solo nivel 1 (root)
+   #elif defined(CONFIG_MESH_RELAY)
+       esp_mesh_lite_set_disallowed_level(1);  // No root, pero permite hijos
+   #else  // CONFIG_MESH_LEAF
+       esp_mesh_lite_set_disallowed_level(1);  // Nodo terminal
    #endif
    ```
 
 3. **Delegación al módulo correspondiente:**
    ```c
-   #if CONFIG_MESH_ROOT
-       root_node_init();
-       root_node_start();
+   #if defined(CONFIG_MESH_ROOT)
+       root_node_init(); root_node_start();
+   #elif defined(CONFIG_MESH_RELAY)
+       relay_node_init(); relay_node_start();
    #else
-       leaf_node_init();
-       leaf_node_start();
+       leaf_node_init(); leaf_node_start();
    #endif
    ```
 
@@ -115,9 +120,34 @@ El código está organizado en módulos separados para **nodo root** y **nodo le
 - SoftAP activo para aceptar nodos hijos
 - Timer imprime: canal, nivel, MAC, RSSI, hijos conectados
 
-#### **1.3 leaf_node/ - Módulo Nodo Hoja**
+#### **1.3 relay_node/ - Módulo Nodo Relay**
 
-**Archivos:** `leaf_node.c`, `leaf_node.h`, `ulp_pir.c`, `ulp_pir.h`
+**Archivos:** `relay_node.c`, `relay_node.h`
+
+**Responsabilidades:**
+- Extender la red mesh (permite nodos hijos conectados)
+- Ahorrar energía con Light Sleep + Modem Power Save
+- Monitorear PIR via GPIO interrupt (no ULP)
+- **Capturar y subir fotos** via HTTP/HTTPS (igual que leaf_node)
+- Mantener conectividad mesh 24/7
+
+**Funciones Principales:**
+- `relay_node_init()`: Configura Power Management, cámara y PIR GPIO
+- `relay_node_start()`: Inicia task principal y timer de status
+- `relay_node_get_child_count()`: Retorna nodos hijos conectados
+
+**Comportamiento:**
+- CPU en Light Sleep automático entre eventos
+- WiFi en Modem Power Save (despierta para DTIM beacons)
+- SoftAP activo para aceptar nodos hijos
+- Captura foto al detectar PIR y la sube al servidor
+- Consumo estimado: ~15-25mA *(hipotético, medir en hardware real)*
+
+> **Ver [POWER_MANAGEMENT.md](./POWER_MANAGEMENT.md)** para detalles completos sobre modos de bajo consumo.
+
+#### **1.4 leaf_node/ - Módulo Nodo Hoja**
+
+**Archivos:** `leaf_node.c`, `leaf_node.h`, `ulp_pir.c`, `ulp_pir.h`, `camera_driver.c/h`
 
 **Responsabilidades:**
 - Operar en modo de ultra bajo consumo
@@ -139,7 +169,7 @@ El código está organizado en módulos separados para **nodo root** y **nodo le
 5. Entrar en deep sleep con ULP activo
 ```
 
-#### **1.4 ulp/ - Coprocesador Ultra Low Power**
+#### **1.5 ulp/ - Coprocesador Ultra Low Power**
 
 **Archivo:** `pir_monitor.S`
 
@@ -445,16 +475,16 @@ El coprocesador ULP FSM permite monitorear sensores mientras el CPU principal es
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         ESP32                                   │
-│  ┌──────────────┐                      ┌──────────────────────┐│
-│  │   CPU Main   │◄──── wake signal ────│    ULP Coprocessor   ││
-│  │  (sleeping)  │                      │     (running)        ││
-│  └──────────────┘                      └──────────┬───────────┘│
-│                                                   │            │
-│                                        ┌──────────▼───────────┐│
-│                                        │   RTC GPIO 15        ││
-│                                        │   (GPIO 12)          ││
-│                                        └──────────┬───────────┘│
-└───────────────────────────────────────────────────┼────────────┘
+│  ┌──────────────┐                      ┌──────────────────────┐ │
+│  │   CPU Main   │◄──── wake signal ────│    ULP Coprocessor   │ │
+│  │  (sleeping)  │                      │     (running)        │ │
+│  └──────────────┘                      └──────────┬───────────┘ │
+│                                                   │             │
+│                                        ┌──────────▼───────────┐ │
+│                                        │   RTC GPIO 15        │ │
+│                                        │   (GPIO 12)          │ │
+│                                        └──────────┬───────────┘ │
+└───────────────────────────────────────────────────┼─────────────┘
                                                     │
                                            ┌────────▼────────┐
                                            │   Sensor PIR    │
@@ -574,7 +604,7 @@ void ulp_pir_enter_deep_sleep(void)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                    NODO LEAF - CICLO DE VIDA                   │
+│                    NODO LEAF - CICLO DE VIDA                    │
 └─────────────────────────────────────────────────────────────────┘
 
      ┌──────────┐
@@ -585,7 +615,7 @@ void ulp_pir_enter_deep_sleep(void)
      ┌──────────┐     ┌─────────────────────────────────────────┐
      │  INIT    │────►│ • Verificar causa de wakeup             │
      └────┬─────┘     │ • Inicializar ULP si primer boot        │
-          │           │ • Configurar GPIO PIR                    │
+          │           │ • Configurar GPIO PIR                   │
           │           └─────────────────────────────────────────┘
           ▼
      ┌──────────┐     ┌─────────────────────────────────────────┐
@@ -603,7 +633,7 @@ void ulp_pir_enter_deep_sleep(void)
      ┌──────────┐     ┌─────────────────────────────────────────┐
      │  SLEEP   │────►│ • Desconectar WiFi                      │
      └────┬─────┘     │ • Habilitar ULP wakeup                  │
-          │           │ • Entrar en deep sleep                   │
+          │           │ • Entrar en deep sleep                  │
           │           └─────────────────────────────────────────┘
           │
           │ (ULP detecta PIR HIGH)
@@ -787,12 +817,13 @@ Define submódulos Git (esp-mesh-lite). Al clonar con `--recursive` se descargan
 
 ## Próximos Pasos Sugeridos
 
-1. **Probar en hardware**: Flashear firmware en ESP32 y verificar comportamiento root/leaf
-2. **Calibrar PIR**: Ajustar sensibilidad y tiempo de polling según sensor utilizado
-3. **Implementar comunicación**: Usar API mesh-lite para enviar alertas PIR al root
-4. **Agregar cámara**: Integrar captura de imagen al detectar movimiento
-5. **Optimizar consumo**: Medir consumo real y ajustar `CONFIG_LEAF_AWAKE_TIME_MS`
+1. ~~**Agregar cámara**~~: ✅ Integrado en relay_node y leaf_node
+2. ~~**Probar en hardware**~~: ✅ Verificado comportamiento root/relay/leaf
+3. ~~**Calibrar PIR**~~: ✅ Ajustada sensibilidad y tiempos
+4. **Almacenamiento SD**: Guardar fotos en tarjeta SD además de subirlas por HTTP
+5. **Optimizar consumo**: Medir consumo real y ajustar tiempos de awake
 6. **Provisioning BLE**: Integrar wifi_provisioning para configuración sin recompilar
+7. **Nodos relay puros**: Agregar opción de relay sin cámara (solo extensor de red)
 
 ---
 
@@ -821,10 +852,10 @@ idf.py fullclean
 idf.py menuconfig
 
 # Cambiar a modo ROOT
-# → Component config → Mesh Lite Configuration → [x] Configure as Mesh Root Node
+# → Mesh Configuration → [x] Configure this device as root node
 
-# Configurar leaf node
-# → Component config → Leaf Node Configuration → Ajustar parámetros
+# Configurar leaf node (solo visible si ROOT está deshabilitado)
+# → Mesh Configuration → Leaf Node Configuration → Ajustar parámetros
 ```
 
 ### Depuración
@@ -844,6 +875,7 @@ esp_log_level_set("ULP_PIR", ESP_LOG_DEBUG);
 
 - [ESP-IDF Programming Guide](https://docs.espressif.com/projects/esp-idf/en/latest/)
 - [ESP-MESH-LITE User Guide](https://github.com/espressif/esp-mesh-lite/blob/release/v1.0/components/mesh_lite/User_Guide.md)
+- [Power Management Guide](./POWER_MANAGEMENT.md) — Modos de bajo consumo y nodo Relay propuesto
 - [FreeRTOS Documentation](https://www.freertos.org/Documentation/RTOS_book.html)
 - [LwIP Wiki](https://lwip.fandom.com/wiki/LwIP_Wiki)
 
@@ -852,4 +884,4 @@ esp_log_level_set("ULP_PIR", ESP_LOG_DEBUG);
 **Documento creado:** Enero 2026  
 **Última actualización:** Enero 2026  
 **Versión del proyecto:** Basado en ESP-MESH-LITE v1.0 y ESP-IDF v5.5.2  
-**Características:** Arquitectura modular Root/Leaf con soporte ULP para bajo consumo
+**Características:** Arquitectura modular Root/Leaf con soporte ULP y cámara para detección de movimiento

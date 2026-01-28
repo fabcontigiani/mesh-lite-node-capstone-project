@@ -4,16 +4,19 @@ set(COMMON_SRCS "main.c")
 # Root node sources
 set(ROOT_SRCS "root_node/root_node.c")
 
+# Relay node sources
+set(RELAY_SRCS "relay_node/relay_node.c")
+
 # Leaf node sources (compiled only when ULP is enabled)
 set(LEAF_SRCS "leaf_node/leaf_node.c" 
               "leaf_node/ulp_pir.c"
               "leaf_node/camera_driver.c")
 
 # Combine all sources
-set(SRCS ${COMMON_SRCS} ${ROOT_SRCS} ${LEAF_SRCS})
+set(SRCS ${COMMON_SRCS} ${ROOT_SRCS} ${RELAY_SRCS} ${LEAF_SRCS})
 
 idf_component_register(SRCS ${SRCS}
-                       INCLUDE_DIRS "." "root_node" "leaf_node"
+                       INCLUDE_DIRS "." "root_node" "relay_node" "leaf_node"
                        REQUIRES esp_driver_gpio ulp esp_driver_ledc
                        PRIV_REQUIRES esp_wifi 
                                      nvs_flash 

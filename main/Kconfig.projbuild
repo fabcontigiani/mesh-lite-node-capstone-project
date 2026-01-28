@@ -13,22 +13,76 @@ config ROUTER_PASSWORD
         help
             Password of the WiFi router.
 
-config MESH_ROOT
-    bool "Configure this device as root node"
-    default n
+choice MESH_NODE_ROLE
+    prompt "Node Role"
+    default MESH_LEAF
     help
-        If enabled, this device will ONLY operate as root node (level 1).
-        It will connect directly to the router and cannot be a child node.
+        Select the role for this device in the mesh network.
+        
+        ROOT: Mesh coordinator, always on, connects to router.
+        RELAY: Network extender, Light Sleep + Modem PS, allows children.
+        LEAF: Sensor node, Deep Sleep + ULP, no children.
+
+config MESH_ROOT
+    bool "Root Node - Mesh coordinator (always on)"
+    help
+        This device will ONLY operate as root node (level 1).
+        It connects directly to the router and cannot be a child node.
         The root node NEVER enters deep sleep - it maintains the mesh 24/7.
+
+config MESH_RELAY
+    bool "Relay Node - Network extender (Light Sleep)"
+    help
+        This device operates as an intermediate relay node.
+        It uses Light Sleep + Modem Power Save for energy efficiency
+        while maintaining mesh connectivity and allowing child nodes.
+        Uses GPIO interrupt for PIR detection (not ULP).
         
-        If disabled, this device CANNOT become root node.
-        It will wait for a root node to be available and connect as a child.
-        Leaf nodes use ULP co-processor for ultra-low power PIR monitoring.
-        
-        This ensures only one designated device can be root in the mesh network.
+        See docs/POWER_MANAGEMENT.md for details.
+
+config MESH_LEAF
+    bool "Leaf Node - Sensor (Deep Sleep + ULP)"
+    help
+        This device operates as a leaf (terminal) node.
+        It uses Deep Sleep + ULP co-processor for ultra-low power.
+        When sleeping, it disconnects from mesh and cannot have children.
+        Uses ULP polling for PIR detection.
+
+endchoice
+
+menu "Relay Node Configuration"
+    depends on MESH_RELAY
+
+config RELAY_PIR_GPIO
+    int "PIR Sensor GPIO pin"
+    default 12
+    range 0 39
+    help
+        GPIO pin connected to the PIR motion sensor.
+        Uses normal GPIO interrupt (not RTC/ULP).
+        Default: GPIO12
+
+config RELAY_AWAKE_TIME_MS
+    int "Time to stay active after motion (ms)"
+    default 60000
+    range 10000 600000
+    help
+        How long the relay node stays fully active after detecting motion.
+        During this time it processes the event and stays responsive.
+        Default: 60000 (60 seconds)
+
+config RELAY_STATUS_INTERVAL_MS
+    int "Status log interval (ms)"
+    default 30000
+    range 5000 300000
+    help
+        How often to print status information (mesh level, children, etc).
+        Default: 30000 (30 seconds)
+
+endmenu
 
 menu "Leaf Node Configuration"
-    depends on !MESH_ROOT
+    depends on MESH_LEAF
 
 config LEAF_PIR_GPIO
     int "PIR Sensor GPIO pin"
