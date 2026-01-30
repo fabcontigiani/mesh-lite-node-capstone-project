@@ -46,6 +46,8 @@ trapcam_mesh/
 │   │   ├── leaf_node.h        # Interfaz pública del módulo leaf
 │   │   ├── camera_driver.c    # Driver para cámara ESP32-CAM (compartido)
 │   │   ├── camera_driver.h    # Interfaz del módulo de cámara
+│   │   ├── sd_storage.c       # Driver para almacenamiento en SD card
+│   │   ├── sd_storage.h       # Interfaz del módulo de almacenamiento SD
 │   │   ├── ulp_pir.c          # Interfaz C para el programa ULP
 │   │   └── ulp_pir.h          # Declaraciones del módulo ULP PIR
 │   └── ulp/                   # Programas del coprocesador ULP
@@ -820,7 +822,7 @@ Define submódulos Git (esp-mesh-lite). Al clonar con `--recursive` se descargan
 1. ~~**Agregar cámara**~~: ✅ Integrado en relay_node y leaf_node
 2. ~~**Probar en hardware**~~: ✅ Verificado comportamiento root/relay/leaf
 3. ~~**Calibrar PIR**~~: ✅ Ajustada sensibilidad y tiempos
-4. **Almacenamiento SD**: Guardar fotos en tarjeta SD además de subirlas por HTTP
+4. ~~**Almacenamiento SD**~~: ✅ Implementado guardado de fotos en tarjeta SD
 5. **Optimizar consumo**: Medir consumo real y ajustar tiempos de awake
 6. **Provisioning BLE**: Integrar wifi_provisioning para configuración sin recompilar
 7. **Nodos relay puros**: Agregar opción de relay sin cámara (solo extensor de red)

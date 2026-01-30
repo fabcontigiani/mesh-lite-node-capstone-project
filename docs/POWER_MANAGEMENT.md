@@ -189,19 +189,22 @@ main/
     ├── leaf_node.h
     ├── camera_driver.c     # Driver ESP32-CAM compartido
     ├── camera_driver.h
+    ├── sd_storage.c        # Driver para almacenamiento en SD
+    ├── sd_storage.h
     ├── ulp_pir.c
     └── ulp_pir.h
 ```
 
 ---
 
-## Funcionalidad Futura: Almacenamiento SD
+## Almacenamiento en SD Card
 
 > [!NOTE]
-> **Planificado para implementación futura**: Las fotos se guardarán en la tarjeta SD además de subirse por HTTP. Esto permitirá:
-> - Backup local de imágenes
+> **Implementado**: Las fotos se guardan en la tarjeta SD además de subirse por HTTP. Esto permite:
+> - Backup local de imágenes con nombre autogenerado (timestamp + contador)
 > - Recuperación de fotos en caso de falla de red
 > - Revisión offline de capturas
+> - Almacenamiento en `/sdcard/photos/` con formato `img_YYYYMMDD_HHMMSS_NNN.jpg`
 
 ---
 

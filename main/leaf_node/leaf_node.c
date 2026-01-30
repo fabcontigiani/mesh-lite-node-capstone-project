@@ -29,6 +29,7 @@
 
 #include "camera_driver.h"
 #include "esp_mesh_lite.h"
+#include "sd_storage.h"
 
 static const char *TAG = "leaf_node";
 
@@ -132,6 +133,13 @@ esp_err_t leaf_node_init(void) {
   if (ret != ESP_OK) {
     ESP_LOGE(TAG, "Failed to initialize ULP PIR: %s", esp_err_to_name(ret));
     return ret;
+  }
+
+  /* Initialize SD storage (optional - continues without if unavailable) */
+  ret = sd_storage_init();
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG,
+             "SD card not available - photos will only be uploaded via HTTP");
   }
 
   /* Create semaphore for PIR interrupt */
@@ -389,15 +397,15 @@ static void IRAM_ATTR pir_isr_handler(void *arg) {
 }
 
 /**
- * Capture photo and upload to HTTPS server
+ * Capture photo, save to SD, and upload to server
  */
 static void process_and_upload_photo(void) {
   ESP_LOGI(TAG, "========================================");
   ESP_LOGI(TAG, "  MOTION EVENT #%" PRIu32, s_motion_events);
   ESP_LOGI(TAG, "========================================");
 
-  /* Capture photo */
-  camera_fb_t *fb = camera_capture_photo();
+  /* Capture photo (with warmup to let sensor auto-calibrate after sleep) */
+  camera_fb_t *fb = camera_capture_photo_with_warmup();
   if (!fb) {
     ESP_LOGE(TAG, "Photo capture failed");
     return;
@@ -405,13 +413,30 @@ static void process_and_upload_photo(void) {
 
   ESP_LOGI(TAG, "Photo captured: %zu bytes", fb->len);
 
-  /* Upload to HTTPS server */
+  /* Save to SD card (if available) */
+  if (sd_storage_is_available()) {
+    char filename[64];
+    esp_err_t sd_ret =
+        sd_storage_save_photo(fb->buf, fb->len, filename, sizeof(filename));
+    if (sd_ret == ESP_OK) {
+      ESP_LOGI(TAG, "Photo saved to SD: %s", filename);
+    } else {
+      ESP_LOGW(TAG, "Failed to save photo to SD: %s", esp_err_to_name(sd_ret));
+    }
+  } else {
+    ESP_LOGD(TAG, "SD card not available, skipping local save");
+  }
+
+  /* Upload to HTTP/HTTPS server */
   bool success = upload_photo_to_server(fb->buf, fb->len);
 
   if (success) {
     ESP_LOGI(TAG, "Photo uploaded successfully!");
   } else {
     ESP_LOGE(TAG, "Photo upload failed!");
+    if (sd_storage_is_available()) {
+      ESP_LOGI(TAG, "Photo is still saved on SD card");
+    }
   }
 
   camera_return_frame_buffer(fb);

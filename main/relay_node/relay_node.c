@@ -31,6 +31,7 @@
 
 #include "esp_mesh_lite.h"
 #include "leaf_node/camera_driver.h"
+#include "leaf_node/sd_storage.h"
 
 static const char *TAG = "relay_node";
 
@@ -54,8 +55,9 @@ static const char *TAG = "relay_node";
 #endif
 
 /* Server Configuration (same as leaf_node) */
-#define USE_HTTPS_UPLOAD 0 /* Set to 1 for HTTPS (remote), 0 for HTTP (local)  \
-                            */
+#define USE_HTTPS_UPLOAD                                                       \
+  0 /* Set to 1 for HTTPS (remote), 0 for HTTP (local)                         \
+     */
 
 #define HTTPS_SERVER_URL "https://proyecto.lab.fabcontigiani.uno/upload/"
 #define LOCAL_HTTP_SERVER_IP "192.168.1.2"
@@ -164,6 +166,13 @@ esp_err_t relay_node_init(void) {
   if (s_status_timer == NULL) {
     ESP_LOGE(TAG, "Failed to create status timer");
     return ESP_ERR_NO_MEM;
+  }
+
+  /* Initialize SD storage (optional - continues without if unavailable) */
+  ret = sd_storage_init();
+  if (ret != ESP_OK) {
+    ESP_LOGW(TAG,
+             "SD card not available - photos will only be uploaded via HTTP");
   }
 
   s_initialized = true;
@@ -352,7 +361,7 @@ static void relay_main_task(void *arg) {
 }
 
 /**
- * Capture photo and upload to server
+ * Capture photo, save to SD, and upload to server
  */
 static void process_and_upload_photo(void) {
   ESP_LOGI(TAG, "Processing motion event #%" PRIu32 "...", s_motion_count);
@@ -362,14 +371,28 @@ static void process_and_upload_photo(void) {
     return;
   }
 
-  /* Capture photo */
-  camera_fb_t *fb = camera_capture_photo();
+  /* Capture photo (with warmup to let sensor auto-calibrate) */
+  camera_fb_t *fb = camera_capture_photo_with_warmup();
   if (!fb) {
     ESP_LOGE(TAG, "Photo capture failed");
     return;
   }
 
   ESP_LOGI(TAG, "Photo captured: %zu bytes", fb->len);
+
+  /* Save to SD card (if available) */
+  if (sd_storage_is_available()) {
+    char filename[64];
+    esp_err_t sd_ret =
+        sd_storage_save_photo(fb->buf, fb->len, filename, sizeof(filename));
+    if (sd_ret == ESP_OK) {
+      ESP_LOGI(TAG, "Photo saved to SD: %s", filename);
+    } else {
+      ESP_LOGW(TAG, "Failed to save photo to SD: %s", esp_err_to_name(sd_ret));
+    }
+  } else {
+    ESP_LOGD(TAG, "SD card not available, skipping local save");
+  }
 
   /* Upload to server */
   bool success = upload_photo_to_server(fb->buf, fb->len);
@@ -378,6 +401,9 @@ static void process_and_upload_photo(void) {
     ESP_LOGI(TAG, "Photo uploaded successfully!");
   } else {
     ESP_LOGE(TAG, "Photo upload failed!");
+    if (sd_storage_is_available()) {
+      ESP_LOGI(TAG, "Photo is still saved on SD card");
+    }
   }
 
   camera_return_frame_buffer(fb);

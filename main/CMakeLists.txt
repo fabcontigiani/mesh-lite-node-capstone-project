@@ -7,10 +7,11 @@ set(ROOT_SRCS "root_node/root_node.c")
 # Relay node sources
 set(RELAY_SRCS "relay_node/relay_node.c")
 
-# Leaf node sources (compiled only when ULP is enabled)
+# Leaf node sources (includes SD storage for photos)
 set(LEAF_SRCS "leaf_node/leaf_node.c" 
               "leaf_node/ulp_pir.c"
-              "leaf_node/camera_driver.c")
+              "leaf_node/camera_driver.c"
+              "leaf_node/sd_storage.c")
 
 # Combine all sources
 set(SRCS ${COMMON_SRCS} ${ROOT_SRCS} ${RELAY_SRCS} ${LEAF_SRCS})
@@ -24,6 +25,7 @@ idf_component_register(SRCS ${SRCS}
                                      esp_event
                                      driver
                                      esp_http_client
+                                     fatfs
                                      espressif__iot_bridge 
                                      mesh_lite
                                      espressif__esp32-camera)
