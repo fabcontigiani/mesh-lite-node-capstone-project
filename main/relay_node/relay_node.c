@@ -60,7 +60,9 @@ static const char *TAG = "relay_node";
      */
 
 #define HTTPS_SERVER_URL "https://proyecto.lab.fabcontigiani.uno/upload/"
-#define LOCAL_HTTP_SERVER_IP "192.168.1.2"
+// #define LOCAL_HTTP_SERVER_IP "192.168.1.2"
+// #define LOCAL_HTTP_SERVER_IP "10.42.0.1"
+#define LOCAL_HTTP_SERVER_IP "172.20.10.4"
 #define LOCAL_HTTP_SERVER_PORT "8000"
 #define LOCAL_HTTP_SERVER_URL                                                  \
   "http://" LOCAL_HTTP_SERVER_IP ":" LOCAL_HTTP_SERVER_PORT "/upload/"
